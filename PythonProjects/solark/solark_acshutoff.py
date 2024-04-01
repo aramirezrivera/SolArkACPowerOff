@@ -1,0 +1,62 @@
+from pymodbus.client.sync import ModbusSerialClient
+from pymodbus.constants import Endian
+from pymodbus.payload import BinaryPayloadDecoder
+from pymodbus.exceptions import ModbusIOException
+import time
+import broadlink
+
+# Connect to Broadlink RMpro infrared device
+device = broadlink.hello('10.10.10.31')
+device.auth()
+
+# TGM AC off command
+#device.enter_learning()
+#packet = device.check_data()
+packet_off = b'&\x00\xca\x00\x92\x90\x124\x13\x11\x125\x12\x11\x12\x11\x13\x11\x12\x11\x134\x12\x11\x13\x11\x125\x12\x11\x12\x11\x13\x11\x12\x11\x13\x11\x12\x11\x125\x125\x124\x13\x11\x12\x11\x12\x12\x12\x11\x125\x125\x125\x124\x125\x125\x124\x134\x134\x125\x125\x124\x134\x134\x125\x125\x124\x134\x13\x11\x124\x13\x11\x125\x124\x13\x11\x12\xab\x91\x90\x12\x11\x134\x12\x12\x124\x134\x125\x125\x12\x11\x125\x125\x12\x11\x125\x125\x124\x134\x125\x125\x12\x11\x12\x12\x12\x11\x125\x125\x124\x134\x12\x12\x12\x11\x12\x11\x13\x11\x12\x11\x12\x12\x12\x11\x12\x11\x13\x11\x12\x11\x12\x12\x12\x11\x12\x11\x12\x12\x12\x11\x12\x12\x12\x11\x12\x11\x125\x12\x11\x134\x12\x12\x12\x11\x125\x12\x00\r\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+packet_dry = b'&\x00\xca\x00\x91\x90\x116\x10\x14\x106\x10\x14\x10\x13\x10\x14\x10\x13\x107\x106\x11\x13\x10\x13\x10\x14\x10\x13\x10\x13\x11\x13\x107\x10\x13\x107\x107\x106\x11\x13\x10\x13\x10\x14\x10\x13\x107\x107\x106\x116\x107\x107\x107\x106\x116\x107\x107\x107\x106\x116\x107\x107\x10\x13\x107\x107\x116\x11\x12\x116\x116\x115\x12\xab\x92\x90\x12\x11\x125\x12\x11\x134\x134\x125\x124\x13\x11\x12\x11\x134\x125\x125\x124\x134\x134\x12\x11\x134\x13\x11\x12\x11\x12\x11\x134\x134\x125\x125\x12\x11\x12\x11\x13\x11\x12\x11\x13\x11\x12\x11\x12\x11\x13\x11\x12\x11\x13\x11\x12\x11\x12\x11\x13\x11\x12\x11\x13\x11\x12\x11\x125\x12\x11\x13\x11\x12\x11\x125\x12\x11\x12\x12\x12\x11\x12\x00\r\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+
+
+def is_grid_not_available(grid_power):
+    return grid_power == 0
+
+client = ModbusSerialClient(
+    method='rtu',
+    port='/dev/ttyUSB0',
+    baudrate=9600,
+    timeout=3,
+    parity='N',
+    stopbits=1,
+    bytesize=8
+)
+
+def ac_shutoff():
+    try:
+        if client.connect():  # Trying to connect to Modbus Server/Slave
+
+            while True:
+                # Read grid total power L1-L2
+                res = client.read_holding_registers(address=169, count=1, unit=1)
+                if not isinstance(res, ModbusIOException):
+                    decoder = BinaryPayloadDecoder.fromRegisters(res.registers, byteorder=Endian.Big, wordorder=Endian.Big)
+                    grid_power = decoder.decode_16bit_int()
+                    if is_grid_not_available(grid_power):
+                        try:
+                            device.auth()
+                            device.send_data(packet_dry)
+                        except ValueError as error:
+                            print(error)
+                    print(f"Grid total power: {grid_power} W")
+                    # if is_grid_not_available(grid_power):
+                    #     device.auth()
+                    #     device.send_data(packet_off)
+                else:
+                    print("Error reading grid total power:", res)
+                time.sleep(10)
+
+    except ModbusIOException as e:
+        print("Modbus communication error:", e)
+
+
+if __name__ == "__main__":
+    ac_shutoff()
+
